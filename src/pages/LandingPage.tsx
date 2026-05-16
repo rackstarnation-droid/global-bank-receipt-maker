@@ -20,9 +20,9 @@ export function LandingPage() {
         </div>
       </header>
 
-      <main className="flex-1 pt-16">
+      <main className="flex-1 pt-4">
         {/* Hero Section */}
-        <section className="relative overflow-hidden py-24 lg:py-32">
+        <section className="relative overflow-hidden py-12 lg:py-16">
           <div className="container relative z-10 mx-auto px-4 lg:px-8">
             <div className="mx-auto max-w-4xl text-center">
               <h1 className="text-4xl font-extrabold tracking-tight sm:text-6xl text-foreground">

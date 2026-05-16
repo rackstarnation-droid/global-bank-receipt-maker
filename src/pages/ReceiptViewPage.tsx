@@ -4,7 +4,6 @@ import {
   PageTitle, 
   PageBody, 
   Button,
-  Card,
   Separator
 } from '@blinkdotnew/ui'
 import { useParams, Link } from '@tanstack/react-router'
@@ -24,7 +23,19 @@ import {
 import { format } from 'date-fns'
 
 export function ReceiptViewPage() {
-  const { id } = useParams({ from: '/receipt/$id' })
+  let params: any = {}
+  try {
+    params = useParams({ strict: false })
+  } catch (e) {
+    console.warn("Router context extraction fallback triggered.")
+  }
+
+  let targetId = params?.id
+  if (!targetId) {
+    const pathParts = window.location.pathname.split('/')
+    targetId = pathParts[pathParts.length - 1]
+  }
+
   const [receipt, setReceipt] = useState<any>(null)
   const [bank, setBank] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -32,12 +43,49 @@ export function ReceiptViewPage() {
 
   useEffect(() => {
     async function fetchData() {
+      if (!targetId || targetId === 'receipt') {
+        setIsLoading(false)
+        return
+      }
+
       try {
-        const r = await blink.db.receipts.get(id)
-        if (r) {
-          setReceipt(r)
-          const b = await blink.db.banks.get(r.bankId)
-          setBank(b)
+        const records = await blink.db.receipts.list({ 
+          where: { id: targetId } 
+        })
+
+        let matchedReceipt = records && records.length > 0 ? records[0] : null
+
+        if (!matchedReceipt) {
+          try {
+            matchedReceipt = await blink.db.receipts.get({ id: targetId })
+          } catch (err) {
+            try {
+              matchedReceipt = await blink.db.receipts.get(targetId)
+            } catch (err2) {
+              console.warn("All receipt retrieval strategies exhausted.")
+            }
+          }
+        }
+
+        if (matchedReceipt) {
+          setReceipt(matchedReceipt)
+          
+          if (matchedReceipt.bankId) {
+            try {
+              const bankRecords = await blink.db.banks.list()
+              const matchedBank = bankRecords?.find((b: any) => b.id === matchedReceipt.bankId)
+              
+              if (matchedBank) {
+                setBank(matchedBank)
+              } else {
+                const b = await blink.db.banks.get(matchedReceipt.bankId)
+                setBank(b)
+              }
+            } catch (bankErr) {
+              const b = await blink.db.banks.get(matchedReceipt.bankId)
+              setBank(b)
+            }
+          }
         }
       } catch (error) {
         console.error('Failed to fetch receipt:', error)
@@ -46,7 +94,7 @@ export function ReceiptViewPage() {
       }
     }
     fetchData()
-  }, [id])
+  }, [targetId])
 
   const handlePrint = () => {
     window.print()
@@ -55,7 +103,7 @@ export function ReceiptViewPage() {
   const handleShare = () => {
     if (navigator.share) {
       navigator.share({
-        title: `Bank Receipt - ${receipt.reference}`,
+        title: `Bank Receipt - ${receipt?.reference || 'Verification'}`,
         url: window.location.href
       })
     } else {
@@ -103,7 +151,7 @@ export function ReceiptViewPage() {
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>ID: {receipt.id}</span>
                 <Separator orientation="vertical" className="h-3" />
-                <span>{format(new Date(receipt.createdAt), 'MMM dd, yyyy HH:mm')}</span>
+                <span>{receipt.createdAt ? format(new Date(receipt.createdAt), 'MMM dd, yyyy HH:mm') : 'N/A'}</span>
               </div>
             </div>
           </div>
@@ -114,7 +162,7 @@ export function ReceiptViewPage() {
             <Button variant="outline" size="sm" onClick={handlePrint} className="gap-2">
               <Printer className="h-4 w-4" /> Print
             </Button>
-            <Button size="sm" className="gap-2">
+            <Button size="sm" onClick={handlePrint} className="gap-2">
               <Download className="h-4 w-4" /> Download
             </Button>
           </div>
@@ -137,7 +185,7 @@ export function ReceiptViewPage() {
                   </div>
                   <div className="flex flex-col">
                     <span className="font-bold text-lg tracking-tight uppercase">{bank?.name || 'Bank Transfer'}</span>
-                    <span className="text-[10px] text-slate-500 font-medium tracking-widest uppercase">Official Payment Advice</span>
+                    <span className="text-[10px] text-slate-500 font-medium tracking-widest uppercase">Official Payment Invoice</span>
                   </div>
                 </div>
                 <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-50 text-green-700 border border-green-100 text-[10px] font-bold uppercase">
@@ -147,9 +195,11 @@ export function ReceiptViewPage() {
               </div>
               <div className="text-right">
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Date & Time</p>
-                <p className="text-sm font-semibold">{format(new Date(receipt.transactionDate), 'dd MMM yyyy · HH:mm')}</p>
+                <p className="text-sm font-semibold">
+                  {receipt.transactionDate ? format(new Date(receipt.transactionDate), 'dd MMM yyyy · HH:mm') : 'N/A'}
+                </p>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-4">Reference Number</p>
-                <p className="text-sm font-mono font-semibold text-primary">{receipt.id.toUpperCase()}</p>
+                <p className="text-sm font-mono font-semibold text-primary">{String(receipt.id).toUpperCase()}</p>
               </div>
             </div>
 
@@ -159,17 +209,17 @@ export function ReceiptViewPage() {
               <div className="text-center py-6 bg-slate-50 rounded-2xl border border-slate-100">
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">Amount Transferred</p>
                 <h2 className="text-4xl font-black text-slate-900">
-                  <span className="text-2xl font-bold mr-1">{receipt.currency}</span>
-                  {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(receipt.amount)}
+                  <span className="text-2xl font-bold mr-1">{receipt.currency || 'USD'}</span>
+                  {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(receipt.amount || 0)}
                 </h2>
                 <p className="text-[11px] text-slate-500 mt-2 font-medium italic">
-                  "{toWords(receipt.amount)} {receipt.currency} Only"
+                  "{toWords(receipt.amount || 0)} {receipt.currency || 'USD'} Only"
                 </p>
               </div>
 
               {/* Transfer Details */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                {/* From */}
+                {/* From Sender */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
                     <div className="h-6 w-6 rounded-full bg-slate-100 flex items-center justify-center">
@@ -180,20 +230,20 @@ export function ReceiptViewPage() {
                   <div className="space-y-3">
                     <div>
                       <p className="text-[10px] text-slate-400 font-bold uppercase">Name</p>
-                      <p className="text-sm font-bold text-slate-800 uppercase">{receipt.senderName}</p>
+                      <p className="text-sm font-bold text-slate-800 uppercase">{receipt.senderName || 'N/A'}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-slate-400 font-bold uppercase">Account Details</p>
-                      <p className="text-sm font-mono font-medium text-slate-600">{formatAccount(receipt.senderAccount)}</p>
+                      <p className="text-sm font-mono font-medium text-slate-600">{formatAccount(receipt.senderAccount || '')}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-slate-400 font-bold uppercase">Issuing Bank</p>
-                      <p className="text-sm font-bold text-slate-800">{bank?.name}</p>
+                      <p className="text-sm font-bold text-slate-800">{bank?.name || 'Official Linked Ledger'}</p>
                     </div>
                   </div>
                 </div>
 
-                {/* To */}
+                {/* To Recipient */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
                     <div className="h-6 w-6 rounded-full bg-slate-100 flex items-center justify-center">
@@ -204,15 +254,15 @@ export function ReceiptViewPage() {
                   <div className="space-y-3">
                     <div>
                       <p className="text-[10px] text-slate-400 font-bold uppercase">Name</p>
-                      <p className="text-sm font-bold text-slate-800 uppercase">{receipt.receiverName}</p>
+                      <p className="text-sm font-bold text-slate-800 uppercase">{receipt.receiverName || 'N/A'}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-slate-400 font-bold uppercase">Account Details</p>
-                      <p className="text-sm font-mono font-medium text-slate-600">{formatAccount(receipt.receiverAccount)}</p>
+                      <p className="text-sm font-mono font-medium text-slate-600">{formatAccount(receipt.receiverAccount || '')}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-slate-400 font-bold uppercase">Payment Reference</p>
-                      <p className="text-sm font-bold text-slate-800 italic">"{receipt.reference}"</p>
+                      <p className="text-sm font-bold text-slate-800 italic">"{receipt.reference || 'None Provided'}"</p>
                     </div>
                   </div>
                 </div>
@@ -271,11 +321,10 @@ export function ReceiptViewPage() {
 }
 
 function toWords(num: number): string {
-  // Simple to-words for v1
   return num.toLocaleString()
 }
 
 function formatAccount(acc: string): string {
-  if (acc.length <= 8) return acc
+  if (!acc || acc.length <= 8) return acc || 'N/A'
   return acc.replace(/(.{4})/g, '$1 ').trim()
 }

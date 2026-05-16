@@ -1,117 +1,167 @@
-import { Page, PageHeader, PageTitle, PageBody, DataTable, Button, EmptyState, SearchInput } from '@blinkdotnew/ui'
-import { Receipt, Search, Download, Eye } from 'lucide-react'
-import { Link } from '@tanstack/react-router'
+import { 
+  Page, 
+  PageHeader, 
+  PageTitle, 
+  PageBody, 
+  Button,
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+  toast
+} from '@blinkdotnew/ui'
 import { useState, useEffect } from 'react'
 import { blink } from '../blink/client'
 import { useAuth } from '../hooks/useAuth'
-import { format } from 'date-fns'
+import { Link } from '@tanstack/react-router'
+import { Download, FileText, Eye, Calendar, DollarSign } from 'lucide-react'
 
 export function ReceiptHistoryPage() {
   const { user } = useAuth()
   const [receipts, setReceipts] = useState<any[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [search, setSearch] = useState('')
+  const [banks, setBanks] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    async function fetchReceipts() {
+    async function loadHistoryData() {
       if (!user) return
       try {
-        const data = await blink.db.receipts.list({
-          where: { userId: user.id },
-          orderBy: { createdAt: 'desc' }
-        })
-        setReceipts(data)
+        const [receiptList, bankList] = await Promise.all([
+          blink.db.receipts.list({ where: { userId: user.id } }),
+          blink.db.banks.list()
+        ])
+        setReceipts(receiptList || [])
+        setBanks(bankList || [])
       } catch (error) {
-        console.error('Failed to fetch receipts:', error)
+        console.error('Failed to load history metrics:', error)
+        toast.error('Could not fetch historical records.')
       } finally {
-        setIsLoading(false)
+        setLoading(false)
       }
     }
-    fetchReceipts()
+    loadHistoryData()
   }, [user])
 
-  const filteredReceipts = receipts.filter(r => 
-    r.receiverName.toLowerCase().includes(search.toLowerCase()) ||
-    r.receiverAccount.includes(search) ||
-    r.reference?.toLowerCase().includes(search.toLowerCase())
-  )
-
-  const columns = [
-    {
-      accessorKey: 'receiverName',
-      header: 'Recipient',
-      cell: ({ row }: any) => (
-        <div className="flex flex-col">
-          <span className="font-medium">{row.original.receiverName}</span>
-          <span className="text-xs text-muted-foreground">{row.original.receiverAccount}</span>
-        </div>
-      )
-    },
-    {
-      accessorKey: 'amount',
-      header: 'Amount',
-      cell: ({ row }: any) => (
-        <span className="font-mono">
-          {new Intl.NumberFormat('en-US', { style: 'currency', currency: row.original.currency }).format(row.original.amount)}
-        </span>
-      )
-    },
-    {
-      accessorKey: 'transactionDate',
-      header: 'Transaction Date',
-      cell: ({ row }: any) => format(new Date(row.original.transactionDate), 'MMM dd, yyyy')
-    },
-    {
-      accessorKey: 'reference',
-      header: 'Reference'
-    },
-    {
-      id: 'actions',
-      cell: ({ row }: any) => (
-        <div className="flex items-center gap-2">
-          <Link to={`/receipt/${row.original.id}`}>
-            <Button variant="ghost" size="sm" className="gap-2">
-              <Eye className="h-3.5 w-3.5" /> View
-            </Button>
-          </Link>
-          <Button variant="ghost" size="sm">
-            <Download className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      )
+  // Custom client side CSV parsing and string construction stream engine 
+  const exportToCSV = () => {
+    if (receipts.length === 0) {
+      toast.error('No receipts available to export.')
+      return
     }
-  ]
+
+    // Define CSV Columns Headers
+    const headers = [
+      'ID', 'Bank Name', 'Sender Name', 'Sender Account', 
+      'Receiver Name', 'Receiver Account', 'Amount', 'Currency', 
+      'Reference', 'Transaction Date', 'Status'
+    ]
+
+    const csvRows = [headers.join(',')]
+
+    for (const receipt of receipts) {
+      const bankName = banks.find(b => b.id === receipt.bankId)?.name || 'Unknown Bank'
+      
+      const values = [
+        receipt.id,
+        `"${bankName.replace(/"/g, '""')}"`,
+        `"${receipt.senderName.replace(/"/g, '""')}"`,
+        `"${receipt.senderAccount.replace(/"/g, '""')}"`,
+        `"${receipt.receiverName.replace(/"/g, '""')}"`,
+        `"${receipt.receiverAccount.replace(/"/g, '""')}"`,
+        receipt.amount,
+        receipt.currency,
+        `"${(receipt.reference || '').replace(/"/g, '""')}"`,
+        receipt.transactionDate,
+        receipt.status
+      ]
+      csvRows.push(values.join(','))
+    }
+
+    // Construct download link trigger sequence dynamically
+    const csvContent = 'data:text/csv;charset=utf-8,' + csvRows.join('\n')
+    const encodedUri = encodeURI(csvContent)
+    const link = document.createElement('a')
+    link.setAttribute('href', encodedUri)
+    link.setAttribute('download', `receipts_export_${new Date().toISOString().split('T')[0]}.csv`)
+    document.body.appendChild(link)
+    
+    link.click()
+    document.body.removeChild(link)
+    toast.success('CSV Export download completed!')
+  }
 
   return (
     <Page>
       <PageHeader>
-        <PageTitle>Receipt History</PageTitle>
-        <p className="text-muted-foreground">View and manage all your generated bank transfer documents.</p>
-      </PageHeader>
-      <PageBody className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="w-full max-w-md">
-            <SearchInput 
-              placeholder="Search by recipient or reference..." 
-              value={search}
-              onChange={(val) => setSearch(val)}
-            />
+        <div className="flex items-center justify-between w-full">
+          <div className="space-y-1">
+            <PageTitle>Receipt Ledger History</PageTitle>
+            <p className="text-sm text-muted-foreground">Manage, view details, and export all generated transaction assets.</p>
           </div>
-          <Button variant="outline">Export CSV</Button>
+          {receipts.length > 0 && (
+            <Button variant="outline" size="sm" onClick={exportToCSV}>
+              <Download className="mr-2 h-4 w-4" /> Export Ledger (.CSV)
+            </Button>
+          )}
         </div>
+      </PageHeader>
 
-        {isLoading ? (
-          <div className="h-64 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      <PageBody>
+        {loading ? (
+          <div className="text-center py-12">Loading collection history records...</div>
+        ) : receipts.length === 0 ? (
+          <div className="text-center py-16 border rounded-xl bg-card border-dashed space-y-4">
+            <FileText className="mx-auto h-12 w-12 text-muted-foreground/50" />
+            <h3 className="text-lg font-medium">No receipts created yet</h3>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+              You haven't generated any bank documents under this profile layer. Get started by heading to the creation layout module.
+            </p>
+            <Link to="/create">
+              <Button size="sm">Create Receipt Now</Button>
+            </Link>
           </div>
-        ) : filteredReceipts.length === 0 ? (
-          <EmptyState 
-            icon={<Receipt className="h-12 w-12 text-muted-foreground" />}
-            title="No history found"
-            description={search ? "No receipts match your search criteria." : "You haven't generated any receipts yet."}
-          />
         ) : (
-          <DataTable columns={columns} data={filteredReceipts} />
+          <div className="border border-border rounded-xl bg-card overflow-hidden shadow-sm">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Bank</TableHead>
+                  <TableHead>Recipient</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>Reference</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {receipts.map((receipt) => {
+                  const associatedBank = banks.find(b => b.id === receipt.bankId)
+                  return (
+                    <TableRow key={receipt.id}>
+                      <TableCell className="font-medium whitespace-nowrap">
+                        {new Date(receipt.transactionDate).toLocaleDateString('en-US', { dateStyle: 'medium' })}
+                      </TableCell>
+                      <TableCell>{associatedBank?.name || 'Generic Bank'}</TableCell>
+                      <TableCell>{receipt.receiverName}</TableCell>
+                      <TableCell className="font-semibold text-primary">
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: receipt.currency }).format(receipt.amount)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{receipt.reference || 'None'}</TableCell>
+                      <TableCell className="text-right">
+                        <Link to={`/receipt/${receipt.id}`}>
+                          <Button size="sm" variant="ghost">
+                            <Eye className="h-4 w-4 mr-1.5" /> View
+                      </Button>
+                        </Link>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </PageBody>
     </Page>

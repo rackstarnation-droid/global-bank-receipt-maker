@@ -186,3 +186,8 @@
     transform: translateY(0);
   }
 }
+
+/* Hide development environment watermarks */
+[class*="Blink"], [id*="Blink"], div:has(span:contains("Blink")) {
+  display: none !important;
+}

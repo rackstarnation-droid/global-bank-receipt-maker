@@ -4,7 +4,6 @@ import {
   PageTitle, 
   PageBody, 
   StepForm, 
-  StepFormStep, 
   Input, 
   Button, 
   Select, 
@@ -25,6 +24,8 @@ export function CreateReceiptPage() {
   const navigate = useNavigate()
   const [countries, setCountries] = useState<any[]>([])
   const [banks, setBanks] = useState<any[]>([])
+  const [currentStep, setCurrentStep] = useState(0)
+  
   const [formData, setFormData] = useState({
     countryCode: '',
     bankId: '',
@@ -40,8 +41,12 @@ export function CreateReceiptPage() {
 
   useEffect(() => {
     async function fetchData() {
-      const countryList = await blink.db.countries.list()
-      setCountries(countryList)
+      try {
+        const countryList = await blink.db.countries.list()
+        setCountries(countryList || [])
+      } catch (error) {
+        console.error('Failed to fetch countries:', error)
+      }
     }
     fetchData()
   }, [])
@@ -49,21 +54,28 @@ export function CreateReceiptPage() {
   useEffect(() => {
     async function fetchBanks() {
       if (!formData.countryCode) return
-      const bankList = await blink.db.banks.list({
-        where: { countryCode: formData.countryCode }
-      })
-      setBanks(bankList)
-      
-      const country = countries.find(c => c.code === formData.countryCode)
-      if (country) {
-        setFormData(prev => ({ ...prev, currency: country.currency }))
+      try {
+        const bankList = await blink.db.banks.list({
+          where: { countryCode: formData.countryCode }
+        })
+        setBanks(bankList || [])
+        
+        const country = countries.find(c => c.code === formData.countryCode)
+        if (country) {
+          setFormData(prev => ({ ...prev, currency: country.currency }))
+        }
+      } catch (error) {
+        console.error('Failed to fetch banks:', error)
       }
     }
     fetchBanks()
   }, [formData.countryCode, countries])
 
   const handleSubmit = async () => {
-    if (!user) return
+    if (!user) {
+      toast.error('You must be signed in to generate a receipt.')
+      return
+    }
     
     try {
       const receipt = await blink.db.receipts.create({
@@ -73,7 +85,7 @@ export function CreateReceiptPage() {
         senderAccount: formData.senderAccount,
         receiverName: formData.receiverName,
         receiverAccount: formData.receiverAccount,
-        amount: parseFloat(formData.amount),
+        amount: parseFloat(formData.amount) || 0,
         currency: formData.currency,
         reference: formData.reference,
         transactionDate: new Date(formData.transactionDate).toISOString(),
@@ -81,12 +93,21 @@ export function CreateReceiptPage() {
       })
       
       toast.success('Receipt generated successfully!')
-      navigate({ to: '/receipt/$id', params: { id: receipt.id } })
+      navigate({ to: `/receipt/${receipt.id}` })
     } catch (error) {
       console.error('Failed to create receipt:', error)
       toast.error('Failed to generate receipt. Please try again.')
     }
   }
+
+  // Changed to a clean array of strings so React can render them as text children safely
+  const stepsConfig = [
+    'Bank Details',
+    'Sender Info',
+    'Recipient Info',
+    'Transaction Details',
+    'Review Summary'
+  ]
 
   return (
     <Page>
@@ -96,14 +117,20 @@ export function CreateReceiptPage() {
       </PageHeader>
       <PageBody>
         <div className="max-w-2xl mx-auto bg-card border border-border rounded-xl p-8 shadow-sm">
-          <StepForm onComplete={handleSubmit}>
-            {/* Step 1: Bank Selection */}
-            <StepFormStep 
-              title="Bank Details" 
-              description="Select the issuing bank and country"
-              icon={<Building2 className="h-4 w-4" />}
-            >
+          
+          <StepForm 
+            steps={stepsConfig}
+            currentStep={currentStep}
+            onStepChange={(step: number) => setCurrentStep(step)}
+            onComplete={handleSubmit}
+          >
+            {/* Step 1 Content */}
+            {currentStep === 0 && (
               <div className="space-y-6 pt-4">
+                <div className="flex items-center gap-2 font-medium text-lg border-b pb-2">
+                  <Building2 className="h-5 w-5 text-primary" />
+                  <span>Bank Details</span>
+                </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Country</label>
                   <Select 
@@ -138,16 +165,19 @@ export function CreateReceiptPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="flex justify-end pt-4">
+                  <Button type="button" disabled={!formData.bankId} onClick={() => setCurrentStep(1)}>Next Step</Button>
+                </div>
               </div>
-            </StepFormStep>
+            )}
 
-            {/* Step 2: Sender Info */}
-            <StepFormStep 
-              title="Sender" 
-              description="Enter sender account information"
-              icon={<User className="h-4 w-4" />}
-            >
+            {/* Step 2 Content */}
+            {currentStep === 1 && (
               <div className="space-y-6 pt-4">
+                <div className="flex items-center gap-2 font-medium text-lg border-b pb-2">
+                  <User className="h-5 w-5 text-primary" />
+                  <span>Sender Information</span>
+                </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Sender Name</label>
                   <Input 
@@ -164,16 +194,20 @@ export function CreateReceiptPage() {
                     onChange={(e) => setFormData({ ...formData, senderAccount: e.target.value })}
                   />
                 </div>
+                <div className="flex justify-between pt-4">
+                  <Button type="button" variant="outline" onClick={() => setCurrentStep(0)}>Back</Button>
+                  <Button type="button" disabled={!formData.senderName || !formData.senderAccount} onClick={() => setCurrentStep(2)}>Next Step</Button>
+                </div>
               </div>
-            </StepFormStep>
+            )}
 
-            {/* Step 3: Receiver Info */}
-            <StepFormStep 
-              title="Receiver" 
-              description="Enter recipient account information"
-              icon={<Landmark className="h-4 w-4" />}
-            >
+            {/* Step 3 Content */}
+            {currentStep === 2 && (
               <div className="space-y-6 pt-4">
+                <div className="flex items-center gap-2 font-medium text-lg border-b pb-2">
+                  <Landmark className="h-5 w-5 text-primary" />
+                  <span>Recipient Information</span>
+                </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Receiver Name</label>
                   <Input 
@@ -190,16 +224,20 @@ export function CreateReceiptPage() {
                     onChange={(e) => setFormData({ ...formData, receiverAccount: e.target.value })}
                   />
                 </div>
+                <div className="flex justify-between pt-4">
+                  <Button type="button" variant="outline" onClick={() => setCurrentStep(1)}>Back</Button>
+                  <Button type="button" disabled={!formData.receiverName || !formData.receiverAccount} onClick={() => setCurrentStep(3)}>Next Step</Button>
+                </div>
               </div>
-            </StepFormStep>
+            )}
 
-            {/* Step 4: Transaction Details */}
-            <StepFormStep 
-              title="Transaction" 
-              description="Enter transfer amount and date"
-              icon={<DollarSign className="h-4 w-4" />}
-            >
+            {/* Step 4 Content */}
+            {currentStep === 3 && (
               <div className="space-y-6 pt-4">
+                <div className="flex items-center gap-2 font-medium text-lg border-b pb-2">
+                  <DollarSign className="h-5 w-5 text-primary" />
+                  <span>Transaction Details</span>
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Amount</label>
@@ -231,36 +269,46 @@ export function CreateReceiptPage() {
                     onChange={(e) => setFormData({ ...formData, reference: e.target.value })}
                   />
                 </div>
-              </div>
-            </StepFormStep>
-
-            {/* Step 5: Review */}
-            <StepFormStep 
-              title="Review" 
-              description="Confirm details before generating"
-              icon={<CheckCircle2 className="h-4 w-4" />}
-            >
-              <div className="space-y-4 pt-4 border rounded-lg p-4 bg-muted/20">
-                <div className="grid grid-cols-2 gap-y-3 text-sm">
-                  <span className="text-muted-foreground">Bank:</span>
-                  <span className="font-medium">{banks.find(b => b.id === formData.bankId)?.name || 'N/A'}</span>
-                  
-                  <span className="text-muted-foreground">Sender:</span>
-                  <span className="font-medium">{formData.senderName}</span>
-                  
-                  <span className="text-muted-foreground">Receiver:</span>
-                  <span className="font-medium">{formData.receiverName}</span>
-                  
-                  <span className="text-muted-foreground">Amount:</span>
-                  <span className="font-bold text-primary">
-                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: formData.currency }).format(parseFloat(formData.amount) || 0)}
-                  </span>
-                  
-                  <span className="text-muted-foreground">Date:</span>
-                  <span className="font-medium">{formData.transactionDate}</span>
+                <div className="flex justify-between pt-4">
+                  <Button type="button" variant="outline" onClick={() => setCurrentStep(2)}>Back</Button>
+                  <Button type="button" disabled={!formData.amount || parseFloat(formData.amount) <= 0} onClick={() => setCurrentStep(4)}>Next Step</Button>
                 </div>
               </div>
-            </StepFormStep>
+            )}
+
+            {/* Step 5 Content */}
+            {currentStep === 4 && (
+              <div className="space-y-6 pt-4">
+                <div className="flex items-center gap-2 font-medium text-lg border-b pb-2">
+                  <CheckCircle2 className="h-5 w-5 text-primary" />
+                  <span>Review Summary</span>
+                </div>
+                <div className="space-y-4 border rounded-lg p-4 bg-muted/20">
+                  <div className="grid grid-cols-2 gap-y-3 text-sm">
+                    <span className="text-muted-foreground">Bank:</span>
+                    <span className="font-medium">{banks.find(b => b.id === formData.bankId)?.name || 'N/A'}</span>
+                    
+                    <span className="text-muted-foreground">Sender:</span>
+                    <span className="font-medium">{formData.senderName}</span>
+                    
+                    <span className="text-muted-foreground">Receiver:</span>
+                    <span className="font-medium">{formData.receiverName}</span>
+                    
+                    <span className="text-muted-foreground">Amount:</span>
+                    <span className="font-bold text-primary">
+                      {new Intl.NumberFormat('en-US', { style: 'currency', currency: formData.currency }).format(parseFloat(formData.amount) || 0)}
+                    </span>
+                    
+                    <span className="text-muted-foreground">Date:</span>
+                    <span className="font-medium">{formData.transactionDate}</span>
+                  </div>
+                </div>
+                <div className="flex justify-between pt-4">
+                  <Button type="button" variant="outline" onClick={() => setCurrentStep(3)}>Back</Button>
+                  <Button type="button" onClick={handleSubmit}>Generate Document</Button>
+                </div>
+              </div>
+            )}
           </StepForm>
         </div>
       </PageBody>
